@@ -67,7 +67,8 @@ if uploaded_file is None:
 | ② | 쿠팡 해외배송 총리뷰수 | **{overseas_total_min}개 이상** |
 | ③ | 쿠팡 해외배송비율 | **{overseas_ratio_min}% 이상** |
 | ④ | 브랜드 키워드 | **X (비브랜드)만 통과** |
-| ⑤ | 최근 1개월 검색량 | **{search_min:,} 이상** |
+| ⑤ | 경쟁률 | **1.0 초과** |
+| ⑥ | 최근 1개월 검색량 | **{search_min:,} 이상** |
 """)
     st.stop()
 
@@ -107,7 +108,7 @@ REQUIRED = [
     "키워드", "카테고리", "브랜드 키워드", "계절성",
     "최근 1개월 검색량",
     "쿠팡 로켓배송비율", "쿠팡 해외배송비율",
-    "쿠팡 해외배송 총리뷰수",
+    "쿠팡 해외배송 총리뷰수", "경쟁률",
 ]
 missing = [c for c in REQUIRED if c not in df.columns]
 if missing:
@@ -131,7 +132,9 @@ filters: dict[str, pd.Series] = {
         df["쿠팡 해외배송비율"] >= (overseas_ratio_min / 100),
     "④ 브랜드 키워드 X":
         df["브랜드 키워드"] == "X",
-    f"⑤ 1개월 검색량 ≥ {search_min:,}":
+    "⑤ 경쟁률 > 1.0":
+        df["경쟁률"] > 1.0,
+    f"⑥ 1개월 검색량 ≥ {search_min:,}":
         df["최근 1개월 검색량"] >= search_min,
 }
 

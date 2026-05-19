@@ -256,6 +256,12 @@ with tab_filter:
                 f"q={urllib.parse.quote(str(k))}&channel=user"
             )
         )
+        df_pass["셀록홈즈_URL"] = df_pass["키워드"].apply(
+            lambda k: (
+                "https://sellochomes.co.kr/sellerlife/coupang-analysis-keyword/"
+                f"?keyword={urllib.parse.quote(str(k))}&page=1"
+            )
+        )
         df_pass["분석상태"] = df_pass["키워드"].apply(get_status)
 
         DISPLAY_MAP = {
@@ -269,6 +275,7 @@ with tab_filter:
             "쿠팡 해외배송 총리뷰수": "해외총리뷰",
             "쿠팡 해외배송 평균리뷰수":"해외평균리뷰",
             "쿠팡_URL":             "🛒 쿠팡 검색",
+            "셀록홈즈_URL":         "📊 셀록홈즈",
         }
 
         df_display = (
@@ -292,6 +299,11 @@ with tab_filter:
                     help="클릭하면 쿠팡 검색 결과가 새 탭에서 열립니다\n"
                          "※ 배송기간 1주 이상 = 구매대행 상품",
                 ),
+                "📊 셀록홈즈": st.column_config.LinkColumn(
+                    "📊 셀록홈즈",
+                    display_text="열기",
+                    help="셀록홈즈 쿠팡 시장분석 · 키워드분석 · 1페이지 상품분석",
+                ),
                 "검색량(1개월)": st.column_config.NumberColumn(format="%d"),
                 "로켓배송%":    st.column_config.NumberColumn(format="%.1f%%"),
                 "해외배송%":    st.column_config.NumberColumn(format="%.1f%%"),
@@ -300,12 +312,12 @@ with tab_filter:
             },
         )
 
-        st.caption("💡 '🛒 쿠팡 검색' 클릭 → 쿠팡 확인 후 [판매자 분석 가이드] 탭으로 이동해 데이터를 기록하세요.")
+        st.caption("💡 '🛒 쿠팡 검색' 클릭 → 배송기간 1주↑ 상품 확인 | '📊 셀록홈즈' 클릭 → 쿠팡 키워드 1페이지 상품 분석")
 
         # 엑셀 다운로드
         out = io.BytesIO()
         with pd.ExcelWriter(out, engine="openpyxl") as writer:
-            df_pass.drop(columns=["_필터결과", "계절태그", "쿠팡_URL", "분석상태"],
+            df_pass.drop(columns=["_필터결과", "계절태그", "쿠팡_URL", "셀록홈즈_URL", "분석상태"],
                          errors="ignore").to_excel(
                 writer, index=False, sheet_name="통과키워드"
             )

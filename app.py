@@ -1,15 +1,8 @@
 import streamlit as st
 import pandas as pd
 import io
-import os
-import time
-import random
-import base64
-import json
-import re
 import urllib.parse
 from datetime import datetime
-from pathlib import Path
 
 st.set_page_config(
     page_title="구매대행 소싱 대시보드",
@@ -27,159 +20,22 @@ st.markdown("""
         border-radius: 10px;
         padding: 12px 16px;
     }
-    /* 테이블 헤더 강조 */
-    .tbl-header {
-        font-size: 0.78rem;
-        font-weight: 700;
-        color: #495057;
-        padding-bottom: 4px;
+    .verdict-box {
+        border-radius: 10px;
+        padding: 16px 20px;
+        font-size: 1.1rem;
+        font-weight: 600;
+        text-align: center;
+        margin-top: 8px;
     }
-    /* 테이블 행 구분선 */
-    .tbl-divider {
-        border: none;
-        border-top: 1px solid #e9ecef;
-        margin: 2px 0;
+    .check-card {
+        background: #f8f9fa;
+        border: 1px solid #dee2e6;
+        border-radius: 10px;
+        padding: 16px;
     }
 </style>
 """, unsafe_allow_html=True)
-
-
-# ══════════════════════════════════════════════════════════════════
-# 세션 상태 초기화
-# ══════════════════════════════════════════════════════════════════
-if "ai_results" not in st.session_state:
-    st.session_state.ai_results: dict = {}
-if "pending_analysis" not in st.session_state:
-    st.session_state.pending_analysis: str | None = None
-
-
-# ══════════════════════════════════════════════════════════════════
-# undetected_chromedriver + Claude API 분석 함수
-# ══════════════════════════════════════════════════════════════════
-def run_playwright_claude_analysis(keyword: str, api_key: str) -> dict:
-    """
-    1. undetected_chromedriver로 쿠팡 검색 → 스크롤 → 스크린샷
-    2. Claude API(멀티모달)로 구매대행 상품 수 분석
-    반환: {"overseas": int, "total": int, "screenshot_path": str}
-    """
-    import undetected_chromedriver as uc
-    import anthropic
-    from PIL import Image
-    import io as _io
-
-    # ── undetected_chromedriver (봇 감지 우회) ────────────────────
-    options = uc.ChromeOptions()
-    options.add_argument("--start-maximized")
-    options.add_argument("--lang=ko-KR")
-    options.add_argument("--disable-notifications")
-
-    driver = uc.Chrome(options=options, headless=False)
-
-    try:
-        url = (
-            "https://www.coupang.com/np/search?"
-            f"q={urllib.parse.quote(keyword)}&channel=user"
-        )
-        driver.get(url)
-        time.sleep(random.uniform(2.5, 4.0))
-
-        # 천천히 스크롤 (사람처럼)
-        scroll_h = driver.execute_script("return document.body.scrollHeight")
-        pos = 0
-        while pos < scroll_h:
-            pos += 300
-            driver.execute_script(f"window.scrollTo(0, {pos})")
-            time.sleep(0.08)
-        time.sleep(random.uniform(1.5, 2.5))
-
-        # 전체 페이지 스크린샷 (CDP)
-        w = driver.execute_script("return document.body.scrollWidth")
-        h = driver.execute_script("return document.body.scrollHeight")
-        cdp_result = driver.execute_cdp_cmd("Page.captureScreenshot", {
-            "clip": {"x": 0, "y": 0, "width": w, "height": h, "scale": 1},
-            "captureBeyondViewport": True,
-        })
-        raw_bytes = base64.b64decode(cdp_result["data"])
-
-    finally:
-        driver.quit()
-
-    # ── 스크린샷 저장 ─────────────────────────────────────────────
-    tmp_dir = Path(os.getenv("TEMP", "/tmp")) / "sourcing_screenshots"
-    tmp_dir.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    screenshot_path = tmp_dir / f"{keyword}_{ts}.png"
-    screenshot_path.write_bytes(raw_bytes)
-
-    # ── 이미지 리사이즈 (Claude API 용량 제한 대응) ───────────────
-    img = Image.open(_io.BytesIO(raw_bytes))
-    MAX_H = 5_000
-    if img.height > MAX_H:
-        ratio = MAX_H / img.height
-        img = img.resize((int(img.width * ratio), MAX_H), Image.LANCZOS)
-    buf = _io.BytesIO()
-    img.save(buf, format="PNG", optimize=True)
-    resized_bytes = buf.getvalue()
-
-    # ── Claude API ────────────────────────────────────────────────
-    client = anthropic.Anthropic(api_key=api_key)
-    img_b64 = base64.standard_b64encode(resized_bytes).decode()
-    today = datetime.now().strftime("%Y년 %m월 %d일")
-
-    resp = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=256,
-        messages=[{
-            "role": "user",
-            "content": [
-                {
-                    "type": "image",
-                    "source": {
-                        "type": "base64",
-                        "media_type": "image/png",
-                        "data": img_b64,
-                    },
-                },
-                {
-                    "type": "text",
-                    "text": (
-                        f"오늘은 {today}입니다.\n"
-                        "이 쿠팡 검색 결과 이미지를 분석해주세요.\n\n"
-                        "1. 첫 페이지에 보이는 전체 상품 수를 세어주세요.\n"
-                        f"2. 각 상품의 배송 예정일을 확인하여, {today} 기준으로 "
-                        "배송 완료까지 8일 이상 걸리는 구매대행/해외배송 상품 수를 세어주세요.\n\n"
-                        "아래 JSON 형식으로만 답변하세요. 다른 텍스트 없이 JSON만 출력하세요:\n"
-                        '{"total": 전체상품수, "overseas": 8일이상_구매대행수}'
-                    ),
-                },
-            ],
-        }],
-    )
-
-    text = resp.content[0].text.strip()
-    m = re.search(r'\{[^}]+\}', text)
-    if m:
-        data = json.loads(m.group())
-        return {
-            "overseas": int(data.get("overseas", 0)),
-            "total": int(data.get("total", 0)),
-            "screenshot_path": str(screenshot_path),
-            "analyzed_at": datetime.now().strftime("%H:%M"),
-        }
-    raise ValueError(f"Claude 응답 파싱 실패: {text}")
-
-
-def _overseas_label(overseas: int, total: int) -> tuple[str, str]:
-    """구매대행 수 → (상태 레이블, 색상)"""
-    if total == 0:
-        return "❓ 분석불가", "⬜"
-    if overseas == 0:
-        return "❌ 구대 없음", "red"
-    if overseas < 5:
-        return "⚠️ 너무 적음", "orange"
-    if overseas <= 10:
-        return "✅ 황금구간", "green"
-    return "🟡 경쟁 많음", "blue"
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -205,34 +61,26 @@ with st.sidebar:
     search_min = st.number_input("최근 1개월 검색량 최소", min_value=0, value=5000, step=500)
 
     st.subheader("키워드 타입")
-    exclude_brand   = st.checkbox("브랜드 키워드 제외",       value=True)
-    require_shopping = st.checkbox("쇼핑성 키워드만 포함",    value=True)
+    exclude_brand = st.checkbox("브랜드 키워드 제외", value=True)
+    require_shopping = st.checkbox("쇼핑성 키워드만 포함", value=True)
     include_seasonal = st.checkbox("계절성 키워드 포함 (⚠️ 태그)", value=True,
                                    help="체크 해제 시 계절성 키워드 탈락")
 
     st.divider()
+
+    # ── 판매자 검증 기준 ──────────────────────────────────────────
     st.subheader("📊 판매자 검증 기준")
     st.caption("판매자 분석 가이드 탭에서 사용됩니다")
-    chk_sales_qty   = st.number_input("① 월 판매량 기준 (개 이상)",   min_value=0, value=50,  step=10)
-    chk_revenue     = st.number_input("② 월 매출액 기준 (만원 이상)", min_value=0, value=300, step=50)
-    chk_competitors = st.number_input("③ 경쟁 셀러 기준 (명 이하)",   min_value=0, value=10,  step=1)
-
-    st.divider()
-    st.subheader("🤖 AI 분석 설정")
-    st.caption("쿠팡 AI 자동 분석 기능에 필요합니다.\n로컬 실행 전용 기능입니다.")
-    api_key_input = st.text_input(
-        "Anthropic API Key",
-        type="password",
-        value=os.environ.get("ANTHROPIC_API_KEY", ""),
-        placeholder="sk-ant-...",
-    )
+    chk_sales_qty  = st.number_input("① 월 판매량 기준 (개 이상)",   min_value=0, value=50,  step=10)
+    chk_revenue    = st.number_input("② 월 매출액 기준 (만원 이상)", min_value=0, value=300, step=50)
+    chk_competitors= st.number_input("③ 경쟁 셀러 기준 (명 이하)",   min_value=0, value=10,  step=1)
 
 
 # ══════════════════════════════════════════════════════════════════
 # 메인 헤더 + 파일 업로드
 # ══════════════════════════════════════════════════════════════════
 st.title("🔍 구매대행 소싱 대시보드")
-st.caption("셀러라이프 키워드 데이터 업로드 → 황금 키워드 필터링 → 쿠팡 AI 자동 분석 → 판매자 교차 검증")
+st.caption("셀러라이프 키워드 데이터를 업로드하면 황금 키워드 필터링 → 판매자 교차 검증까지 한 화면에서 진행합니다.")
 
 uploaded_file = st.file_uploader(
     "📂 엑셀 파일 업로드 (.xlsx / .xls / .csv)",
@@ -261,7 +109,7 @@ if uploaded_file is None:
 # 데이터 로딩
 # ══════════════════════════════════════════════════════════════════
 @st.cache_data(show_spinner=False)
-def load_data(file_bytes: bytes, file_name: str) -> pd.DataFrame:
+def load_data(file_bytes, file_name):
     if file_name.endswith(".csv"):
         return pd.read_csv(io.BytesIO(file_bytes))
     return pd.read_excel(io.BytesIO(file_bytes))
@@ -278,7 +126,7 @@ with st.spinner("파일 불러오는 중..."):
 df = df_raw.copy()
 df.columns = [str(c).replace("\n", " ").strip() for c in df.columns]
 
-# 중복 제거 (검색량 높은 행 우선)
+# ── 중복 키워드 제거 (검색량 높은 행 우선 유지) ───────────────────────────
 _before_dedup = len(df)
 if "키워드" in df.columns and "최근 1개월 검색량" in df.columns:
     df = (
@@ -296,7 +144,7 @@ REQUIRED = [
 ]
 missing = [c for c in REQUIRED if c not in df.columns]
 if missing:
-    st.error("필수 컬럼을 찾을 수 없습니다.")
+    st.error("필수 컬럼을 찾을 수 없습니다. 컬럼명을 확인해 주세요.")
     st.write("**없는 컬럼:**", missing)
     st.write("**현재 파일 컬럼:**", list(df.columns))
     st.stop()
@@ -335,7 +183,7 @@ for fname, fmask in filters.items():
 
 df["_필터결과"] = first_fail
 df_pass = df[pass_mask].copy()
-df_pass["계절태그"] = df_pass["계절성"].apply(lambda x: "⚠️" if x == "있음" else "-")
+df_pass["계절태그"] = df_pass["계절성"].apply(lambda x: "⚠️ 계절" if x == "있음" else "-")
 
 n_pass   = len(df_pass)
 n_fail   = total - n_pass
@@ -343,42 +191,17 @@ pass_rate = n_pass / total * 100 if total > 0 else 0
 
 
 # ══════════════════════════════════════════════════════════════════
-# AI 분석 실행 (버튼 클릭 후 다음 렌더에서 처리)
-# ══════════════════════════════════════════════════════════════════
-if st.session_state.pending_analysis:
-    kw = st.session_state.pending_analysis
-    if not api_key_input:
-        st.error("사이드바 하단 'Anthropic API Key'를 먼저 입력해주세요.")
-        st.session_state.pending_analysis = None
-    else:
-        with st.spinner(
-            f"**'{kw}'** 쿠팡 AI 분석 중...  \n"
-            "크롬 브라우저가 자동 실행됩니다. 창을 닫지 마세요. (30~60초 소요)"
-        ):
-            try:
-                result = run_playwright_claude_analysis(kw, api_key_input)
-                st.session_state.ai_results[kw] = result
-                o, t = result["overseas"], result["total"]
-                st.toast(f"'{kw}' 분석 완료 — 구대 {o}개 / 전체 {t}개", icon="✅")
-            except Exception as e:
-                st.session_state.ai_results[kw] = {"error": str(e)}
-                st.error(f"분석 실패: {e}")
-            finally:
-                st.session_state.pending_analysis = None
-        st.rerun()
-
-
-# ══════════════════════════════════════════════════════════════════
 # 요약 지표
 # ══════════════════════════════════════════════════════════════════
 st.divider()
 c1, c2, c3, c4, c5 = st.columns(5)
-c1.metric("원본 행 수",  f"{_before_dedup:,}개")
-c2.metric("중복 제거",   f"{_dedup_removed:,}개",
-          delta=f"-{_dedup_removed}" if _dedup_removed else None, delta_color="off")
-c3.metric("✅ 통과",     f"{n_pass:,}개")
-c4.metric("❌ 탈락",     f"{n_fail:,}개")
-c5.metric("통과율",      f"{pass_rate:.1f}%")
+c1.metric("원본 행 수",    f"{_before_dedup:,}개")
+c2.metric("중복 제거",     f"{_dedup_removed:,}개",
+          delta=f"-{_dedup_removed}" if _dedup_removed else None,
+          delta_color="off")
+c3.metric("✅ 통과",       f"{n_pass:,}개")
+c4.metric("❌ 탈락",       f"{n_fail:,}개")
+c5.metric("통과율",        f"{pass_rate:.1f}%")
 st.divider()
 
 with st.expander("📊 필터별 탈락 현황"):
@@ -408,132 +231,90 @@ tab_filter, tab_guide = st.tabs(["🔍 필터 결과", "📋 판매자 분석 �
 
 
 # ──────────────────────────────────────────────────────────────────
-# TAB 1 : 필터 결과 + AI 분석
+# TAB 1 : 필터 결과
 # ──────────────────────────────────────────────────────────────────
 with tab_filter:
     st.subheader(f"✅ 통과 키워드 — {n_pass:,}개")
 
     if n_pass == 0:
-        st.warning("통과 키워드가 없습니다. 사이드바에서 필터 수치를 완화해보세요.")
+        st.warning("통과 키워드가 없습니다. 왼쪽 사이드바에서 필터 수치를 완화해보세요.")
     else:
-        st.caption(
-            "🛒 **쿠팡 열기** → 쿠팡 검색 결과 새 탭  |  "
-            "🤖 **AI 분석** → 크롬 자동 실행 후 배송일 기준 구매대행 상품 수 파악  |  "
-            "✅황금(5~10개) ⚠️적음(<5) 🟡경쟁많음(>10)"
-        )
+        # 분석 상태: 판매자 가이드 탭에서 데이터 입력 여부 반영
+        def get_status(kw):
+            qty   = st.session_state.get(f"qty_{kw}",   0)
+            rev   = st.session_state.get(f"rev_{kw}",   0)
+            comp  = st.session_state.get(f"comp_{kw}",  0)
+            store = st.session_state.get(f"store_{kw}", False)
+            if qty > 0 or rev > 0 or comp > 0 or store:
+                return "🔍 분석중"
+            return "⬜ 미검토"
 
-        # ── 테이블 헤더 ────────────────────────────────────────────
-        RATIOS = [2.2, 0.5, 1.2, 0.9, 0.9, 0.7, 1.0, 1.0, 0.8]
-        HEADERS = ["키워드", "계절", "검색량", "해외배송%", "해외평균리뷰",
-                   "🛒 쿠팡", "🤖 AI분석", "구대/전체", "구대비율"]
-
-        hcols = st.columns(RATIOS)
-        for hc, h in zip(hcols, HEADERS):
-            hc.markdown(f"<div class='tbl-header'>{h}</div>", unsafe_allow_html=True)
-        st.markdown("<hr class='tbl-divider'>", unsafe_allow_html=True)
-
-        # ── 테이블 행 ──────────────────────────────────────────────
-        df_sorted = df_pass.sort_values("최근 1개월 검색량", ascending=False)
-
-        for _, row in df_sorted.iterrows():
-            kw       = str(row["키워드"])
-            ai_res   = st.session_state.ai_results.get(kw)
-            cols     = st.columns(RATIOS)
-
-            cols[0].write(f"**{kw}**")
-            cols[1].write(row["계절태그"])
-            cols[2].write(f"{int(row['최근 1개월 검색량']):,}")
-            cols[3].write(f"{row['쿠팡 해외배송비율']*100:.0f}%")
-            cols[4].write(f"{row['쿠팡 해외배송 평균리뷰수']:.0f}")
-
-            coupang_url = (
+        # 쿠팡 검색 URL 생성
+        df_pass["쿠팡_URL"] = df_pass["키워드"].apply(
+            lambda k: (
                 "https://www.coupang.com/np/search?"
-                f"q={urllib.parse.quote(kw)}&channel=user"
+                f"q={urllib.parse.quote(str(k))}&channel=user"
             )
-            cols[5].link_button("열기", coupang_url, use_container_width=True)
+        )
+        df_pass["분석상태"] = df_pass["키워드"].apply(get_status)
 
-            if ai_res is None:
-                # 미분석: AI 분석 버튼
-                if cols[6].button("🤖 분석", key=f"ai_{kw}", use_container_width=True):
-                    st.session_state.pending_analysis = kw
-                    st.rerun()
-                cols[7].write("-")
-                cols[8].write("-")
+        DISPLAY_MAP = {
+            "분석상태":              "상태",
+            "키워드":                "키워드",
+            "카테고리":              "카테고리",
+            "계절태그":              "계절성",
+            "최근 1개월 검색량":     "검색량(1개월)",
+            "쿠팡 로켓배송비율":     "로켓배송%",
+            "쿠팡 해외배송비율":     "해외배송%",
+            "쿠팡 해외배송 총리뷰수": "해외총리뷰",
+            "쿠팡 해외배송 평균리뷰수":"해외평균리뷰",
+            "쿠팡_URL":             "🛒 쿠팡 검색",
+        }
 
-            elif "error" in ai_res:
-                cols[6].error("오류", icon="❌")
-                if cols[6].button("재시도", key=f"retry_{kw}", use_container_width=True):
-                    del st.session_state.ai_results[kw]
-                    st.session_state.pending_analysis = kw
-                    st.rerun()
-                cols[7].write("-")
-                cols[8].write("-")
+        df_display = (
+            df_pass[list(DISPLAY_MAP.keys())]
+            .rename(columns=DISPLAY_MAP)
+            .sort_values("검색량(1개월)", ascending=False)
+            .copy()
+        )
+        df_display["로켓배송%"] = (df_display["로켓배송%"] * 100).round(1)
+        df_display["해외배송%"] = (df_display["해외배송%"] * 100).round(1)
 
-            else:
-                o = ai_res.get("overseas", 0)
-                t = ai_res.get("total", 0)
-                label, _ = _overseas_label(o, t)
-                cols[6].write(label)
-                cols[7].write(f"{o} / {t}")
-                cols[8].write(f"{o/t*100:.0f}%" if t > 0 else "-")
-
-                # 스크린샷 확인 링크
-                sc_path = ai_res.get("screenshot_path", "")
-                if sc_path and Path(sc_path).exists():
-                    with cols[6]:
-                        with st.popover("📷"):
-                            st.image(sc_path, caption="분석에 사용된 스크린샷", use_container_width=True)
-
-            st.markdown("<hr class='tbl-divider'>", unsafe_allow_html=True)
-
-        # ── AI 분석 완료된 결과만 따로 표시 ─────────────────────────
-        analyzed = {k: v for k, v in st.session_state.ai_results.items()
-                    if "error" not in v and k in df_pass["키워드"].values}
-        if analyzed:
-            st.markdown("---")
-            st.markdown("#### 🤖 AI 분석 결과 요약")
-            result_rows = []
-            for kw, res in analyzed.items():
-                o, t = res.get("overseas", 0), res.get("total", 0)
-                label, _ = _overseas_label(o, t)
-                result_rows.append({
-                    "키워드": kw,
-                    "구대/전체": f"{o}/{t}",
-                    "구대비율": f"{o/t*100:.0f}%" if t > 0 else "-",
-                    "판정": label,
-                    "분석시각": res.get("analyzed_at", "-"),
-                })
-            st.dataframe(
-                pd.DataFrame(result_rows),
-                use_container_width=True,
-                hide_index=True,
-            )
-
-        # ── 엑셀 다운로드 ─────────────────────────────────────────
-        st.markdown("---")
-        dl_df = df_pass.drop(columns=["_필터결과", "계절태그"], errors="ignore").copy()
-        # AI 분석 결과 컬럼 추가
-        dl_df["AI_구대수"]  = dl_df["키워드"].map(
-            lambda k: st.session_state.ai_results.get(k, {}).get("overseas", ""))
-        dl_df["AI_전체수"]  = dl_df["키워드"].map(
-            lambda k: st.session_state.ai_results.get(k, {}).get("total", ""))
-        dl_df["AI_구대비율"] = dl_df.apply(
-            lambda r: (
-                f"{r['AI_구대수']/r['AI_전체수']*100:.0f}%"
-                if isinstance(r["AI_구대수"], int) and isinstance(r["AI_전체수"], int) and r["AI_전체수"] > 0
-                else ""
-            ), axis=1
+        st.dataframe(
+            df_display,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "상태":          st.column_config.TextColumn("상태", width=80),
+                "🛒 쿠팡 검색": st.column_config.LinkColumn(
+                    "🛒 쿠팡 검색",
+                    display_text="열기",
+                    help="클릭하면 쿠팡 검색 결과가 새 탭에서 열립니다\n"
+                         "※ 배송기간 1주 이상 = 구매대행 상품",
+                ),
+                "검색량(1개월)": st.column_config.NumberColumn(format="%d"),
+                "로켓배송%":    st.column_config.NumberColumn(format="%.1f%%"),
+                "해외배송%":    st.column_config.NumberColumn(format="%.1f%%"),
+                "해외총리뷰":   st.column_config.NumberColumn(format="%d"),
+                "해외평균리뷰": st.column_config.NumberColumn(format="%.0f"),
+            },
         )
 
+        st.caption("💡 '🛒 쿠팡 검색' 클릭 → 쿠팡 확인 후 [판매자 분석 가이드] 탭으로 이동해 데이터를 기록하세요.")
+
+        # 엑셀 다운로드
         out = io.BytesIO()
         with pd.ExcelWriter(out, engine="openpyxl") as writer:
-            dl_df.to_excel(writer, index=False, sheet_name="통과키워드")
+            df_pass.drop(columns=["_필터결과", "계절태그", "쿠팡_URL", "분석상태"],
+                         errors="ignore").to_excel(
+                writer, index=False, sheet_name="통과키워드"
+            )
             df.rename(columns={"_필터결과": "필터결과"}).to_excel(
                 writer, index=False, sheet_name="전체_탈락이유포함"
             )
         ts = datetime.now().strftime("%Y%m%d_%H%M")
         st.download_button(
-            label="📥 결과 엑셀 다운로드 (AI 분석 결과 포함)",
+            label="📥 결과 엑셀 다운로드",
             data=out.getvalue(),
             file_name=f"소싱필터_{ts}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -547,18 +328,24 @@ with tab_filter:
 with tab_guide:
     st.subheader("📋 쿠팡 판매자 교차 검증")
     st.caption(
-        "쿠팡 판매자 전용 페이지에서 확인한 실제 수치를 입력하면 소싱 가능 여부를 자동 판정합니다. "
-        "기준값은 사이드바 '판매자 검증 기준'에서 변경하세요."
+        "쿠팡 판매자 전용 페이지에서 확인한 실제 수치를 입력하면 소싱 가능 여부를 자동으로 판정합니다. "
+        "기준값은 왼쪽 사이드바 하단 '판매자 검증 기준'에서 변경할 수 있습니다."
     )
 
     if n_pass == 0:
-        st.info("필터 통과 키워드가 없습니다. 파일을 업로드하고 필터링을 진행하세요.")
+        st.info("필터를 통과한 키워드가 없습니다. 먼저 파일을 업로드하고 필터링을 진행하세요.")
         st.stop()
 
-    kw_list    = df_pass.sort_values("최근 1개월 검색량", ascending=False)["키워드"].tolist()
-    selected_kw = st.selectbox("분석할 키워드 선택", kw_list, key="guide_kw",
-                               help="필터 통과 키워드 (검색량 내림차순)")
+    # 키워드 선택
+    kw_list = df_pass.sort_values("최근 1개월 검색량", ascending=False)["키워드"].tolist()
+    selected_kw = st.selectbox(
+        "분석할 키워드 선택",
+        kw_list,
+        key="guide_kw",
+        help="필터 통과 키워드 목록 (검색량 내림차순)",
+    )
 
+    # 선택 키워드의 필터 지표 요약
     row = df_pass[df_pass["키워드"] == selected_kw].iloc[0]
     m1, m2, m3, m4, m5 = st.columns(5)
     m1.metric("검색량(1개월)", f"{int(row['최근 1개월 검색량']):,}")
@@ -567,72 +354,84 @@ with tab_guide:
     m4.metric("해외 총리뷰",  f"{int(row['쿠팡 해외배송 총리뷰수']):,}")
     m5.metric("해외 평균리뷰", f"{row['쿠팡 해외배송 평균리뷰수']:.0f}")
 
-    # AI 분석 결과 표시 (있을 경우)
-    ai_res = st.session_state.ai_results.get(selected_kw)
-    if ai_res and "error" not in ai_res:
-        o, t = ai_res.get("overseas", 0), ai_res.get("total", 0)
-        label, _ = _overseas_label(o, t)
-        st.info(f"🤖 AI 분석 결과: 구매대행 **{o}개** / 전체 **{t}개** → {label}")
-
+    # 쿠팡 바로가기
     coupang_url = (
         "https://www.coupang.com/np/search?"
         f"q={urllib.parse.quote(str(selected_kw))}&channel=user"
     )
-    st.link_button(f"🛒 쿠팡에서 '{selected_kw}' 검색하기", coupang_url,
-                   help="※ 배송기간 1주 이상인 상품 = 구매대행 상품")
+    st.link_button(
+        f"🛒 쿠팡에서 '{selected_kw}' 검색하기",
+        coupang_url,
+        help="※ 검색 결과에서 배송기간 1주 이상인 상품 = 구매대행 상품",
+    )
 
     st.divider()
     st.markdown("#### 실제 데이터 입력 (쿠팡 판매자 전용 페이지 확인 후 기입)")
 
+    # ── 체크리스트 3개 수치 항목 ────────────────────────────────────
     col1, col2, col3 = st.columns(3)
 
     with col1:
         st.markdown(f"**① 월 판매량**  \n기준: `{chk_sales_qty:,}개 이상`")
-        actual_qty = st.number_input("실제 월 판매량 (개)", min_value=0, value=0, step=10,
-                                     key=f"qty_{selected_kw}")
+        actual_qty = st.number_input(
+            "실제 월 판매량 (개)", min_value=0, value=0, step=10,
+            key=f"qty_{selected_kw}",
+        )
         if actual_qty > 0:
-            (st.success if actual_qty >= chk_sales_qty else st.error)(
-                f"{'✅ 충족' if actual_qty >= chk_sales_qty else '❌ 미달'}  ({actual_qty:,}개)"
-            )
+            if actual_qty >= chk_sales_qty:
+                st.success(f"✅ 충족  ({actual_qty:,}개)")
+            else:
+                st.error(f"❌ 미달  ({actual_qty:,}개)")
         else:
             st.caption("미입력")
 
     with col2:
         st.markdown(f"**② 월 매출액**  \n기준: `{chk_revenue:,}만원 이상`")
-        actual_rev = st.number_input("실제 월 매출액 (만원)", min_value=0, value=0, step=10,
-                                     key=f"rev_{selected_kw}")
+        actual_rev = st.number_input(
+            "실제 월 매출액 (만원)", min_value=0, value=0, step=10,
+            key=f"rev_{selected_kw}",
+        )
         if actual_rev > 0:
-            (st.success if actual_rev >= chk_revenue else st.error)(
-                f"{'✅ 충족' if actual_rev >= chk_revenue else '❌ 미달'}  ({actual_rev:,}만원)"
-            )
+            if actual_rev >= chk_revenue:
+                st.success(f"✅ 충족  ({actual_rev:,}만원)")
+            else:
+                st.error(f"❌ 미달  ({actual_rev:,}만원)")
         else:
             st.caption("미입력")
 
     with col3:
         st.markdown(f"**③ 경쟁 셀러 수**  \n기준: `{chk_competitors}명 이하`")
-        actual_comp = st.number_input("실제 경쟁 셀러 수 (명)", min_value=0, value=0, step=1,
-                                      key=f"comp_{selected_kw}")
+        actual_comp = st.number_input(
+            "실제 경쟁 셀러 수 (명)", min_value=0, value=0, step=1,
+            key=f"comp_{selected_kw}",
+        )
         if actual_comp > 0:
-            (st.success if actual_comp <= chk_competitors else st.error)(
-                f"{'✅ 충족' if actual_comp <= chk_competitors else '❌ 초과'}  ({actual_comp}명)"
-            )
+            if actual_comp <= chk_competitors:
+                st.success(f"✅ 충족  ({actual_comp}명)")
+            else:
+                st.error(f"❌ 초과  ({actual_comp}명)")
         else:
             st.caption("미입력")
 
+    # ── 정성 체크 ────────────────────────────────────────────────────
     st.divider()
     st.markdown("**④ 상위 셀러 스토어 방문 & 효자상품 파악**")
-    store_visited = st.checkbox("상위 셀러 스토어를 방문하여 효자상품 목록을 확인했다",
-                                key=f"store_{selected_kw}")
+    store_visited = st.checkbox(
+        "상위 셀러 스토어를 방문하여 효자상품 목록을 확인했다",
+        key=f"store_{selected_kw}",
+    )
 
+    # 메모
     st.markdown("**📝 소싱 메모**")
     st.text_area(
-        "메모",
-        placeholder="예) 중국어명: 儿童双层床  /  단가 약 12만원  /  디자인 차별화 여지 있음",
+        "이 키워드에 대한 메모 (중국어 상품명, 타오바오 링크, 특이사항 등)",
+        placeholder="예) 중국어명: 游戏椅  /  단가 약 8만원대  /  디자인 차별화 여지 있음",
         key=f"notes_{selected_kw}",
         height=100,
         label_visibility="collapsed",
     )
 
+    # ── 종합 판정 ────────────────────────────────────────────────────
     st.divider()
     st.markdown("#### 종합 판정")
 
@@ -640,31 +439,44 @@ with tab_guide:
     rev_ok  = (actual_rev  >= chk_revenue)      if actual_rev  > 0 else None
     comp_ok = (actual_comp <= chk_competitors)  if actual_comp > 0 else None
 
-    quant_results  = [r for r in [qty_ok, rev_ok, comp_ok] if r is not None]
-    entered_count  = len(quant_results) + (1 if store_visited else 0)
+    quant_results = [r for r in [qty_ok, rev_ok, comp_ok] if r is not None]
+    entered_count = len(quant_results) + (1 if store_visited else 0)
 
     if entered_count == 0:
         st.info("실제 데이터를 입력하면 종합 판정이 표시됩니다.")
     else:
-        passed_count   = sum(1 for r in quant_results if r) + (1 if store_visited else 0)
-        total_checked  = len(quant_results) + (1 if store_visited else 0)
-        all_passed     = all(quant_results) and store_visited if quant_results else store_visited
+        passed_count = sum(1 for r in quant_results if r) + (1 if store_visited else 0)
+        total_checked = len(quant_results) + (1 if store_visited else 0)
+
+        all_quant_passed = all(quant_results) if quant_results else True
+        all_passed = all_quant_passed and store_visited
 
         if all_passed and total_checked == 4:
-            st.success("✅ 소싱 적합 — 4/4 기준 모두 충족")
+            st.success(f"✅ 소싱 적합 — 4/4 기준 모두 충족")
         elif passed_count >= 3:
             st.warning(f"🟡 검토 필요 — {passed_count}/{total_checked} 기준 충족")
         else:
             st.error(f"❌ 소싱 부적합 — {passed_count}/{total_checked} 기준 충족")
 
-        detail_rows = [
-            {"항목": "① 월 판매량",    "결과": "✅" if qty_ok else ("❌" if qty_ok is False else "⬜"),
-             "입력값": f"{actual_qty:,}개"   if actual_qty  > 0 else "미입력"},
-            {"항목": "② 월 매출액",    "결과": "✅" if rev_ok else ("❌" if rev_ok is False else "⬜"),
-             "입력값": f"{actual_rev:,}만원"  if actual_rev  > 0 else "미입력"},
-            {"항목": "③ 경쟁 셀러 수", "결과": "✅" if comp_ok else ("❌" if comp_ok is False else "⬜"),
-             "입력값": f"{actual_comp}명"     if actual_comp > 0 else "미입력"},
-            {"항목": "④ 스토어 방문",  "결과": "✅" if store_visited else "⬜",
-             "입력값": "완료" if store_visited else "미완료"},
+        # 판정 상세
+        detail_rows = []
+        labels = [
+            ("① 월 판매량",    qty_ok,   f"{actual_qty:,}개"   if actual_qty  > 0 else "미입력"),
+            ("② 월 매출액",    rev_ok,   f"{actual_rev:,}만원" if actual_rev  > 0 else "미입력"),
+            ("③ 경쟁 셀러 수", comp_ok,  f"{actual_comp}명"    if actual_comp > 0 else "미입력"),
+            ("④ 스토어 방문",  store_visited if store_visited else None, "완료" if store_visited else "미완료"),
         ]
-        st.dataframe(pd.DataFrame(detail_rows), use_container_width=True, hide_index=True)
+        for label, result, value in labels:
+            if result is True:
+                icon = "✅"
+            elif result is False:
+                icon = "❌"
+            else:
+                icon = "⬜"
+            detail_rows.append({"항목": label, "결과": icon, "입력값": value})
+
+        st.dataframe(
+            pd.DataFrame(detail_rows),
+            use_container_width=True,
+            hide_index=True,
+        )

@@ -236,19 +236,20 @@ else:
         st.session_state[mark_key] = {}
 
     # 저장된 마킹 복원
-    df_display["마킹"] = df_display["키워드"].map(st.session_state[mark_key]).fillna("")
+    df_display["👍 GOOD"] = df_display["키워드"].map(
+        lambda k: st.session_state[mark_key].get(k, {}).get("good", False)
+    )
+    df_display["👎 BAD"] = df_display["키워드"].map(
+        lambda k: st.session_state[mark_key].get(k, {}).get("bad", False)
+    )
 
     edited = st.data_editor(
         df_display,
         use_container_width=True,
         hide_index=True,
         column_config={
-            "마킹": st.column_config.SelectboxColumn(
-                "마킹",
-                options=["", "GOOD", "BAD"],
-                required=False,
-                width=90,
-            ),
+            "👍 GOOD": st.column_config.CheckboxColumn("👍 GOOD", width=80),
+            "👎 BAD":  st.column_config.CheckboxColumn("👎 BAD",  width=80),
             "🛒 쿠팡 검색": st.column_config.LinkColumn(
                 "🛒 쿠팡 검색",
                 display_text="열기",
@@ -265,14 +266,17 @@ else:
             "해외배송%":    st.column_config.NumberColumn(format="%.1f%%"),
             "해외총리뷰":   st.column_config.NumberColumn(format="%d"),
         },
-        disabled=[col for col in df_display.columns if col != "마킹"],
+        disabled=[col for col in df_display.columns if col not in ("👍 GOOD", "👎 BAD")],
     )
 
     # 변경된 마킹 저장
     for _, row in edited.iterrows():
-        st.session_state[mark_key][row["키워드"]] = row["마킹"]
+        st.session_state[mark_key][row["키워드"]] = {
+            "good": bool(row["👍 GOOD"]),
+            "bad":  bool(row["👎 BAD"]),
+        }
 
-    st.caption("💡 '🛒 쿠팡 검색' 클릭 → 배송기간 1주↑ 상품 확인 | '📊 셀록홈즈' 클릭 → 쿠팡 키워드 1페이지 상품 분석 | 마킹 열에서 GOOD/BAD 선택 가능")
+    st.caption("💡 '🛒 쿠팡 검색' 클릭 → 배송기간 1주↑ 상품 확인 | '📊 셀록홈즈' 클릭 → 쿠팡 키워드 1페이지 상품 분석")
 
     # 엑셀 다운로드 (화면 표시 데이터 그대로)
     out = io.BytesIO()

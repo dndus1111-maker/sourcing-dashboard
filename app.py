@@ -34,7 +34,7 @@ with st.sidebar:
     st.subheader("쿠팡 배송")
     rocket_max = st.slider("로켓배송비율 상한 (%)", 0, 100, 40, 5,
                            help="이 값 미만인 키워드만 통과")
-    overseas_ratio_min = st.slider("해외배송비율 하한 (%)", 0, 100, 10, 5,
+    overseas_ratio_min = st.slider("해외배송비율 하한 (%)", 0, 100, 50, 5,
                                    help="이 값 이상인 키워드만 통과")
 
     st.subheader("리뷰")
@@ -42,7 +42,7 @@ with st.sidebar:
                                          help="0이면 실제 판매 없음 → 제외")
 
     st.subheader("검색량")
-    search_min = st.number_input("최근 1개월 검색량 최소", min_value=0, value=5000, step=500)
+    search_min = st.number_input("최근 1개월 검색량 최소", min_value=0, value=1000, step=500)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -227,11 +227,25 @@ else:
     df_display["로켓배송%"] = (df_display["로켓배송%"] * 100).round(1)
     df_display["해외배송%"] = (df_display["해외배송%"] * 100).round(1)
 
-    st.dataframe(
+    # 마킹 session_state 초기화 (파일별)
+    mark_key = f"marks_{uploaded_file.name}"
+    if mark_key not in st.session_state:
+        st.session_state[mark_key] = {}
+
+    # 저장된 마킹 복원
+    df_display["마킹"] = df_display["키워드"].map(st.session_state[mark_key]).fillna("")
+
+    edited = st.data_editor(
         df_display,
         use_container_width=True,
         hide_index=True,
         column_config={
+            "마킹": st.column_config.SelectboxColumn(
+                "마킹",
+                options=["", "GOOD", "BAD"],
+                required=False,
+                width=90,
+            ),
             "🛒 쿠팡 검색": st.column_config.LinkColumn(
                 "🛒 쿠팡 검색",
                 display_text="열기",
@@ -248,20 +262,19 @@ else:
             "해외배송%":    st.column_config.NumberColumn(format="%.1f%%"),
             "해외총리뷰":   st.column_config.NumberColumn(format="%d"),
         },
+        disabled=[col for col in df_display.columns if col != "마킹"],
     )
 
-    st.caption("💡 '🛒 쿠팡 검색' 클릭 → 배송기간 1주↑ 상품 확인 | '📊 셀록홈즈' 클릭 → 쿠팡 키워드 1페이지 상품 분석")
+    # 변경된 마킹 저장
+    for _, row in edited.iterrows():
+        st.session_state[mark_key][row["키워드"]] = row["마킹"]
 
-    # 엑셀 다운로드
+    st.caption("💡 '🛒 쿠팡 검색' 클릭 → 배송기간 1주↑ 상품 확인 | '📊 셀록홈즈' 클릭 → 쿠팡 키워드 1페이지 상품 분석 | 마킹 열에서 GOOD/BAD 선택 가능")
+
+    # 엑셀 다운로드 (화면 표시 데이터 그대로)
     out = io.BytesIO()
     with pd.ExcelWriter(out, engine="openpyxl") as writer:
-        df_pass.drop(columns=["_필터결과", "계절태그", "쿠팡_URL", "셀록홈즈_URL"],
-                     errors="ignore").to_excel(
-            writer, index=False, sheet_name="통과키워드"
-        )
-        df.rename(columns={"_필터결과": "필터결과"}).to_excel(
-            writer, index=False, sheet_name="전체_탈락이유포함"
-        )
+        edited.to_excel(writer, index=False, sheet_name="통과키워드")
     ts = datetime.now().strftime("%Y%m%d_%H%M")
     st.download_button(
         label="📥 결과 엑셀 다운로드",

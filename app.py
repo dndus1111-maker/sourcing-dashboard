@@ -225,7 +225,7 @@ else:
         df_pass[list(DISPLAY_MAP.keys())]
         .rename(columns=DISPLAY_MAP)
         .sort_values("검색량(1개월)", ascending=False)
-        .copy()
+        .reset_index(drop=True)
     )
     df_display["로켓배송%"] = (df_display["로켓배송%"] * 100).round(1)
     df_display["해외배송%"] = (df_display["해외배송%"] * 100).round(1)
@@ -245,6 +245,7 @@ else:
 
     edited = st.data_editor(
         df_display,
+        key=mark_key,
         use_container_width=True,
         hide_index=True,
         column_config={

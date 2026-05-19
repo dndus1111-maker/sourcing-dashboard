@@ -90,8 +90,7 @@ if uploaded_file is None:
 | ② | 쿠팡 해외배송 총리뷰수 | **{overseas_total_min}개 이상** |
 | ③ | 쿠팡 해외배송비율 | **{overseas_ratio_min}% 이상** |
 | ④ | 브랜드 키워드 | **X (비브랜드)만 통과** |
-| ⑤ | 쇼핑성 키워드 | **O (구매의도)만 통과** |
-| ⑥ | 최근 1개월 검색량 | **{search_min:,} 이상** |
+| ⑤ | 최근 1개월 검색량 | **{search_min:,} 이상** |
 """)
     st.stop()
 
@@ -155,9 +154,7 @@ filters: dict[str, pd.Series] = {
         df["쿠팡 해외배송비율"] >= (overseas_ratio_min / 100),
     "④ 브랜드 키워드 X":
         df["브랜드 키워드"] == "X",
-    "⑤ 쇼핑성 키워드 O":
-        df["쇼핑성 키워드"] == "O",
-    f"⑥ 1개월 검색량 ≥ {search_min:,}":
+    f"⑤ 1개월 검색량 ≥ {search_min:,}":
         df["최근 1개월 검색량"] >= search_min,
 }
 

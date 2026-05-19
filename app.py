@@ -48,23 +48,15 @@ with st.sidebar:
     st.subheader("쿠팡 배송")
     rocket_max = st.slider("로켓배송비율 상한 (%)", 0, 100, 40, 5,
                            help="이 값 미만인 키워드만 통과")
-    overseas_ratio_min = st.slider("해외배송비율 하한 (%)", 0, 50, 10, 5,
+    overseas_ratio_min = st.slider("해외배송비율 하한 (%)", 0, 100, 10, 5,
                                    help="이 값 이상인 키워드만 통과")
 
     st.subheader("리뷰")
     overseas_total_min = st.number_input("해외배송 총리뷰 최소", min_value=0, value=1, step=1,
                                          help="0이면 실제 판매 없음 → 제외")
-    overseas_avg_min = st.number_input("해외배송 평균리뷰 최소", min_value=0, value=5, step=1,
-                                       help="실거래 증거 기준")
 
     st.subheader("검색량")
     search_min = st.number_input("최근 1개월 검색량 최소", min_value=0, value=5000, step=500)
-
-    st.subheader("키워드 타입")
-    exclude_brand = st.checkbox("브랜드 키워드 제외", value=True)
-    require_shopping = st.checkbox("쇼핑성 키워드만 포함", value=True)
-    include_seasonal = st.checkbox("계절성 키워드 포함 (⚠️ 태그)", value=True,
-                                   help="체크 해제 시 계절성 키워드 탈락")
 
     st.divider()
 
@@ -99,8 +91,7 @@ if uploaded_file is None:
 | ③ | 쿠팡 해외배송비율 | **{overseas_ratio_min}% 이상** |
 | ④ | 브랜드 키워드 | **X (비브랜드)만 통과** |
 | ⑤ | 쇼핑성 키워드 | **O (구매의도)만 통과** |
-| ⑥ | 쿠팡 해외배송 평균리뷰 | **{overseas_avg_min}개 이상** |
-| ⑦ | 최근 1개월 검색량 | **{search_min:,} 이상** |
+| ⑥ | 최근 1개월 검색량 | **{search_min:,} 이상** |
 """)
     st.stop()
 
@@ -140,7 +131,7 @@ REQUIRED = [
     "키워드", "카테고리", "브랜드 키워드", "쇼핑성 키워드", "계절성",
     "최근 1개월 검색량",
     "쿠팡 로켓배송비율", "쿠팡 해외배송비율",
-    "쿠팡 해외배송 총리뷰수", "쿠팡 해외배송 평균리뷰수",
+    "쿠팡 해외배송 총리뷰수",
 ]
 missing = [c for c in REQUIRED if c not in df.columns]
 if missing:
@@ -163,16 +154,12 @@ filters: dict[str, pd.Series] = {
     f"③ 해외배송비율 ≥ {overseas_ratio_min}%":
         df["쿠팡 해외배송비율"] >= (overseas_ratio_min / 100),
     "④ 브랜드 키워드 X":
-        df["브랜드 키워드"] == "X" if exclude_brand else pd.Series(True, index=df.index),
+        df["브랜드 키워드"] == "X",
     "⑤ 쇼핑성 키워드 O":
-        df["쇼핑성 키워드"] == "O" if require_shopping else pd.Series(True, index=df.index),
-    f"⑥ 해외배송 평균리뷰 ≥ {overseas_avg_min}":
-        df["쿠팡 해외배송 평균리뷰수"] >= overseas_avg_min,
-    f"⑦ 1개월 검색량 ≥ {search_min:,}":
+        df["쇼핑성 키워드"] == "O",
+    f"⑥ 1개월 검색량 ≥ {search_min:,}":
         df["최근 1개월 검색량"] >= search_min,
 }
-if not include_seasonal:
-    filters["⑧ 계절성 없음"] = df["계절성"] == "없음"
 
 pass_mask  = pd.Series(True, index=df.index)
 first_fail = pd.Series("✅ 통과", index=df.index)
@@ -273,7 +260,6 @@ with tab_filter:
             "쿠팡 로켓배송비율":     "로켓배송%",
             "쿠팡 해외배송비율":     "해외배송%",
             "쿠팡 해외배송 총리뷰수": "해외총리뷰",
-            "쿠팡 해외배송 평균리뷰수":"해외평균리뷰",
             "쿠팡_URL":             "🛒 쿠팡 검색",
             "셀록홈즈_URL":         "📊 셀록홈즈",
         }
@@ -308,7 +294,6 @@ with tab_filter:
                 "로켓배송%":    st.column_config.NumberColumn(format="%.1f%%"),
                 "해외배송%":    st.column_config.NumberColumn(format="%.1f%%"),
                 "해외총리뷰":   st.column_config.NumberColumn(format="%d"),
-                "해외평균리뷰": st.column_config.NumberColumn(format="%.0f"),
             },
         )
 
@@ -359,12 +344,11 @@ with tab_guide:
 
     # 선택 키워드의 필터 지표 요약
     row = df_pass[df_pass["키워드"] == selected_kw].iloc[0]
-    m1, m2, m3, m4, m5 = st.columns(5)
+    m1, m2, m3, m4 = st.columns(4)
     m1.metric("검색량(1개월)", f"{int(row['최근 1개월 검색량']):,}")
     m2.metric("로켓배송비율",  f"{row['쿠팡 로켓배송비율']*100:.1f}%")
     m3.metric("해외배송비율",  f"{row['쿠팡 해외배송비율']*100:.1f}%")
     m4.metric("해외 총리뷰",  f"{int(row['쿠팡 해외배송 총리뷰수']):,}")
-    m5.metric("해외 평균리뷰", f"{row['쿠팡 해외배송 평균리뷰수']:.0f}")
 
     # 쿠팡 바로가기
     coupang_url = (

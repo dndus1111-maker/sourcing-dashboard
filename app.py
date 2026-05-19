@@ -245,7 +245,6 @@ else:
 
     edited = st.data_editor(
         df_display,
-        key=f"editor_{uploaded_file.name}",
         use_container_width=True,
         hide_index=True,
         column_config={

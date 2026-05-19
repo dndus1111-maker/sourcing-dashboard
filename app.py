@@ -144,7 +144,7 @@ def run_playwright_claude_analysis(keyword: str, api_key: str) -> dict:
     today = datetime.now().strftime("%Y년 %m월 %d일")
 
     resp = client.messages.create(
-        model="claude-opus-4-5",
+        model="claude-sonnet-4-6",
         max_tokens=256,
         messages=[{
             "role": "user",

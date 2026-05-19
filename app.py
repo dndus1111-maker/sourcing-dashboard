@@ -54,72 +54,55 @@ if "pending_analysis" not in st.session_state:
 
 
 # ══════════════════════════════════════════════════════════════════
-# Playwright + Claude API 분석 함수
+# undetected_chromedriver + Claude API 분석 함수
 # ══════════════════════════════════════════════════════════════════
 def run_playwright_claude_analysis(keyword: str, api_key: str) -> dict:
     """
-    1. Playwright로 쿠팡 검색 → 스크롤 → 스크린샷
+    1. undetected_chromedriver로 쿠팡 검색 → 스크롤 → 스크린샷
     2. Claude API(멀티모달)로 구매대행 상품 수 분석
     반환: {"overseas": int, "total": int, "screenshot_path": str}
     """
-    from playwright.sync_api import sync_playwright
+    import undetected_chromedriver as uc
     import anthropic
     from PIL import Image
     import io as _io
 
-    # ── Playwright ────────────────────────────────────────────────
-    with sync_playwright() as p:
-        browser = p.chromium.launch(
-            headless=False,
-            args=[
-                "--disable-blink-features=AutomationControlled",
-                "--no-sandbox",
-                "--disable-dev-shm-usage",
-                "--start-maximized",
-            ],
-        )
-        context = browser.new_context(
-            user_agent=(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/124.0.0.0 Safari/537.36"
-            ),
-            viewport={"width": 1440, "height": 900},
-            locale="ko-KR",
-            timezone_id="Asia/Seoul",
-        )
-        # webdriver 흔적 숨김
-        context.add_init_script(
-            "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
-        )
-        page = context.new_page()
+    # ── undetected_chromedriver (봇 감지 우회) ────────────────────
+    options = uc.ChromeOptions()
+    options.add_argument("--start-maximized")
+    options.add_argument("--lang=ko-KR")
+    options.add_argument("--disable-notifications")
 
+    driver = uc.Chrome(options=options, headless=False)
+
+    try:
         url = (
             "https://www.coupang.com/np/search?"
             f"q={urllib.parse.quote(keyword)}&channel=user"
         )
-        page.goto(url, wait_until="domcontentloaded", timeout=30_000)
-        time.sleep(random.uniform(2.5, 4.0))  # 사람처럼 대기
+        driver.get(url)
+        time.sleep(random.uniform(2.5, 4.0))
 
         # 천천히 스크롤 (사람처럼)
-        page.evaluate("""
-            new Promise(resolve => {
-                let total = 0;
-                const dist = 250;
-                const timer = setInterval(() => {
-                    window.scrollBy(0, dist);
-                    total += dist;
-                    if (total >= document.body.scrollHeight) {
-                        clearInterval(timer);
-                        resolve();
-                    }
-                }, 90);
-            })
-        """)
+        scroll_h = driver.execute_script("return document.body.scrollHeight")
+        pos = 0
+        while pos < scroll_h:
+            pos += 300
+            driver.execute_script(f"window.scrollTo(0, {pos})")
+            time.sleep(0.08)
         time.sleep(random.uniform(1.5, 2.5))
 
-        raw_bytes = page.screenshot(full_page=True)
-        browser.close()
+        # 전체 페이지 스크린샷 (CDP)
+        w = driver.execute_script("return document.body.scrollWidth")
+        h = driver.execute_script("return document.body.scrollHeight")
+        cdp_result = driver.execute_cdp_cmd("Page.captureScreenshot", {
+            "clip": {"x": 0, "y": 0, "width": w, "height": h, "scale": 1},
+            "captureBeyondViewport": True,
+        })
+        raw_bytes = base64.b64decode(cdp_result["data"])
+
+    finally:
+        driver.quit()
 
     # ── 스크린샷 저장 ─────────────────────────────────────────────
     tmp_dir = Path(os.getenv("TEMP", "/tmp")) / "sourcing_screenshots"

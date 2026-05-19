@@ -230,21 +230,13 @@ else:
     df_display["로켓배송%"] = (df_display["로켓배송%"] * 100).round(1)
     df_display["해외배송%"] = (df_display["해외배송%"] * 100).round(1)
 
-    # 마킹 session_state 초기화 (파일별)
-    mark_key = f"marks_{uploaded_file.name}"
-    if mark_key not in st.session_state:
-        st.session_state[mark_key] = {}
-
-    # 저장된 마킹 복원
-    df_display["👍 GOOD"] = df_display["키워드"].map(
-        lambda k: st.session_state[mark_key].get(k, {}).get("good", False)
-    )
-    df_display["👎 BAD"] = df_display["키워드"].map(
-        lambda k: st.session_state[mark_key].get(k, {}).get("bad", False)
-    )
+    # 위젯 자체 상태로 마킹 관리 (단일 저장소)
+    df_display["👍 GOOD"] = False
+    df_display["👎 BAD"] = False
 
     edited = st.data_editor(
         df_display,
+        key=f"editor_{uploaded_file.name}",
         use_container_width=True,
         hide_index=True,
         column_config={
@@ -268,13 +260,6 @@ else:
         },
         disabled=[col for col in df_display.columns if col not in ("👍 GOOD", "👎 BAD")],
     )
-
-    # 변경된 마킹 저장
-    for _, row in edited.iterrows():
-        st.session_state[mark_key][row["키워드"]] = {
-            "good": bool(row["👍 GOOD"]),
-            "bad":  bool(row["👎 BAD"]),
-        }
 
     st.caption("💡 '🛒 쿠팡 검색' 클릭 → 배송기간 1주↑ 상품 확인 | '📊 셀록홈즈' 클릭 → 쿠팡 키워드 1페이지 상품 분석")
 

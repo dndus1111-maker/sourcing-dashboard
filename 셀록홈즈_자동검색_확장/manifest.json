@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "셀록홈즈 URL 자동검색",
+  "version": "1.2",
+  "description": "URL의 keyword 파라미터로 셀록홈즈 쿠팡 키워드분석을 자동 검색합니다. (구매대행 소싱 대시보드 연동)",
+  "content_scripts": [
+    {
+      "matches": ["https://sellochomes.co.kr/sellerlife/coupang-analysis-keyword*"],
+      "js": ["content.js"],
+      "run_at": "document_idle",
+      "world": "MAIN"
+    }
+  ]
+}

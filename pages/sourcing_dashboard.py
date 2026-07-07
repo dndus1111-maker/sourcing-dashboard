@@ -226,21 +226,13 @@ st.subheader(f"✅ 통과 키워드 — {n_pass:,}개")
 if n_pass == 0:
     st.warning("통과 키워드가 없습니다. 왼쪽 사이드바에서 필터 수치를 완화해보세요.")
 else:
-    st.caption(
-        "💡 **🛒 쿠팡**(빨강) → 배송기간 1주↑ 상품 확인 | "
-        "**📊 셀록홈즈**(파랑) → 전용 탭 하나에서 열림 "
-        "(쿠팡 윙 로그인 1회 후 계속 유지 · 자동검색 확장 설치 시 키워드 자동 검색)"
-    )
-
     # ── 계절상품만 보기 (서버측 필터) ────────────────────────────────
     season_only = st.checkbox("계절상품만 보기", value=False)
 
     view = df_pass.sort_values("최근 1개월 검색량", ascending=False).reset_index(drop=True)
     if season_only:
         view = view[view["계절성"].astype(str).str.strip() == "있음"].reset_index(drop=True)
-        st.caption(f"🔎 계절상품만: **{len(view)}개** (전체 통과 {n_pass:,}개 중)")
-
-    st.caption("🔎 표의 각 열 제목 아래 칸에 입력해 필터 · 제목 클릭 시 정렬 (엑셀 필터처럼). 예) 피크월에 `6월` 입력 → 6월 피크 상품만")
+        st.caption(f"계절상품만: {len(view)}개 (전체 통과 {n_pass:,}개 중)")
 
     def _row_html(r, i):
         kw = str(r["키워드"])
@@ -259,12 +251,12 @@ else:
             _short = " > ".join(_parts[:2])
             _cat_full = html.escape(cat, quote=True)
             cat_cell = (
-                f'<td class="cat" data-full="{_cat_full}">'
+                f'<td class="cat" data-full="{_cat_full}"><div class="cat-inner">'
                 f'<span class="cat-text">{html.escape(_short)}</span>'
-                f'<span class="cat-more" data-full="{_cat_full}" '
+                f'<span class="cat-arrow" data-full="{_cat_full}" '
                 f'data-short="{html.escape(_short, quote=True)}" '
-                f'onclick="toggleCat(this)"> ⋯더보기</span>'
-                f'</td>'
+                f'onclick="toggleCat(this)">▾</span>'
+                f'</div></td>'
             )
         else:
             cat_cell = f'<td class="cat">{html.escape(cat)}</td>'
@@ -280,9 +272,10 @@ else:
             f'<td class="num">{overseas:.1f}%</td>'
             f'<td class="num">{int(r["쿠팡 해외배송 총리뷰수"]):,}</td>'
             '<td class="act">'
-            f'<a class="btn btn-cp" href="{cp_url}" target="coupang_tab">🛒 쿠팡</a>'
-            f'<a class="btn btn-sk" href="{sk_url}" target="sellochomes_tab" '
-            f'data-kw="{kw_attr}" onclick="copyKw(this)">📊 셀록홈즈</a>'
+            f'<a class="btn btn-cp" href="{cp_url}" target="coupang_tab" '
+            f'onclick="onCpClick(this,event)">🛒 쿠팡</a>'
+            f'<a class="btn btn-sk" href="{sk_url}" target="_blank" rel="noopener" '
+            f'data-kw="{kw_attr}" onclick="onSkClick(this)">📊 셀록홈즈</a>'
             '</td>'
             '<td class="c"><input type="checkbox" class="good"></td>'
             '<td class="c"><input type="checkbox" class="bad"></td>'
@@ -300,21 +293,35 @@ else:
     padding: 7px 10px; text-align: left; white-space: nowrap; }
   table.rk th:last-child, table.rk td:last-child { border-right: none; }
   table.rk thead th { position: sticky; top: 0; background: #f4f5f7; z-index: 1;
-    font-weight: 700; border-bottom: 2px solid #e0e0e0; vertical-align: top; }
+    font-weight: 700; border-bottom: 2px solid #e0e0e0; vertical-align: middle; }
   table.rk tbody tr:hover { background: #fafbff; }
-  .th-t { cursor: pointer; user-select: none; white-space: nowrap; }
-  .th-t:hover { color: #3b3bff; }
-  .arr { color: #3b3bff; font-size: 0.75rem; }
-  .fbox { width: 100%; box-sizing: border-box; margin-top: 5px; padding: 3px 6px;
-    font-size: 0.78rem; font-weight: 400; border: 1px solid #ddd; border-radius: 5px; }
-  .fbox:focus { outline: none; border-color: #3b3bff; }
+  .th-flex { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .sarr { color: #3b3bff; font-size: 0.72rem; }
+  .fbtn { cursor: pointer; color: #999; font-size: 0.7rem; user-select: none; padding: 0 2px; }
+  .fbtn:hover { color: #3b3bff; }
+  .fbtn.active { color: #3b3bff; }
   .rowcount { margin-left: 12px; color: #666; font-size: 0.85rem; }
   .num { text-align: right; }
   .c { text-align: center; }
   .season { color: #555; font-size: 0.82rem; }
-  .cat-more { color: #3b3bff; cursor: pointer; font-size: 0.76rem; white-space: nowrap; }
-  .cat-more:hover { text-decoration: underline; }
+  .cat-inner { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .cat-arrow { color: #999; cursor: pointer; font-size: 0.72rem; user-select: none; }
+  .cat-arrow:hover { color: #3b3bff; }
   .kw { font-weight: 600; }
+  .fpanel { position: fixed; z-index: 1000; background: #fff; border: 1px solid #ccc;
+    border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.15); padding: 8px; width: 220px;
+    font-size: 0.82rem; font-weight: 400; }
+  .fp-sort { display: flex; gap: 6px; margin-bottom: 6px; }
+  .fp-sort button, .fp-btns button { flex: 1; padding: 5px; border: 1px solid #ddd;
+    background: #f7f7f9; border-radius: 5px; cursor: pointer; font-size: 0.8rem; }
+  .fp-sort button:hover, .fp-btns button:hover { background: #ececff; }
+  .fp-search { width: 100%; box-sizing: border-box; padding: 4px 6px; margin-bottom: 6px;
+    border: 1px solid #ddd; border-radius: 5px; }
+  .fp-all { display: block; padding: 3px 0; border-bottom: 1px solid #eee; margin-bottom: 4px; }
+  .fp-list { max-height: 180px; overflow: auto; }
+  .fp-item { display: block; padding: 2px 0; white-space: nowrap; cursor: pointer; }
+  .fp-item:hover { background: #f5f5ff; }
+  .fp-btns { display: flex; gap: 6px; margin-top: 8px; }
   .act { text-align: center; }
   .btn { display: inline-block; text-decoration: none; border-radius: 8px;
     padding: 6px 12px; font-size: 0.85rem; cursor: pointer; margin: 0 3px;
@@ -335,14 +342,14 @@ else:
   <div class="wrap">
     <table class="rk">
       <thead><tr>
-        <th data-col="0"><div class="th-t" onclick="sortBy(0)">키워드<span class="arr"></span></div><input class="fbox" data-col="0" placeholder="필터"></th>
-        <th data-col="1"><div class="th-t" onclick="sortBy(1)">카테고리<span class="arr"></span></div><input class="fbox" data-col="1" placeholder="필터"></th>
-        <th data-col="2"><div class="th-t" onclick="sortBy(2)">피크월<span class="arr"></span></div><input class="fbox" data-col="2" placeholder="예: 6월"></th>
-        <th data-col="3"><div class="th-t" onclick="sortBy(3)">시즌월<span class="arr"></span></div><input class="fbox" data-col="3" placeholder="예: 6"></th>
-        <th data-col="4"><div class="th-t" onclick="sortBy(4)">검색량(1개월)<span class="arr"></span></div><input class="fbox" data-col="4" placeholder="필터"></th>
-        <th data-col="5"><div class="th-t" onclick="sortBy(5)">로켓배송%<span class="arr"></span></div><input class="fbox" data-col="5" placeholder="필터"></th>
-        <th data-col="6"><div class="th-t" onclick="sortBy(6)">해외배송%<span class="arr"></span></div><input class="fbox" data-col="6" placeholder="필터"></th>
-        <th data-col="7"><div class="th-t" onclick="sortBy(7)">해외총리뷰<span class="arr"></span></div><input class="fbox" data-col="7" placeholder="필터"></th>
+        <th data-col="0"><div class="th-flex"><span>키워드<span class="sarr"></span></span><span class="fbtn" data-col="0" onclick="openFilter(0,event)">▾</span></div></th>
+        <th data-col="1"><div class="th-flex"><span>카테고리<span class="sarr"></span></span><span class="fbtn" data-col="1" onclick="openFilter(1,event)">▾</span></div></th>
+        <th data-col="2"><div class="th-flex"><span>피크월<span class="sarr"></span></span><span class="fbtn" data-col="2" onclick="openFilter(2,event)">▾</span></div></th>
+        <th data-col="3"><div class="th-flex"><span>시즌월<span class="sarr"></span></span><span class="fbtn" data-col="3" onclick="openFilter(3,event)">▾</span></div></th>
+        <th data-col="4"><div class="th-flex"><span>검색량(1개월)<span class="sarr"></span></span><span class="fbtn" data-col="4" onclick="openFilter(4,event)">▾</span></div></th>
+        <th data-col="5"><div class="th-flex"><span>로켓배송%<span class="sarr"></span></span><span class="fbtn" data-col="5" onclick="openFilter(5,event)">▾</span></div></th>
+        <th data-col="6"><div class="th-flex"><span>해외배송%<span class="sarr"></span></span><span class="fbtn" data-col="6" onclick="openFilter(6,event)">▾</span></div></th>
+        <th data-col="7"><div class="th-flex"><span>해외총리뷰<span class="sarr"></span></span><span class="fbtn" data-col="7" onclick="openFilter(7,event)">▾</span></div></th>
         <th>바로가기</th><th>👍 GOOD</th><th>👎 BAD</th>
       </tr></thead>
       <tbody>__ROWS__</tbody>
@@ -355,8 +362,7 @@ else:
   <div id="toast" class="toast"></div>
 </div>
 <script>
-  function copyKw(el) {
-    var kw = el.getAttribute('data-kw');
+  function copyToClip(kw) {
     try {
       var ta = document.createElement('textarea');
       ta.value = kw;
@@ -367,12 +373,30 @@ else:
       document.body.removeChild(ta);
     } catch (e) {}
     try { if (navigator.clipboard) navigator.clipboard.writeText(kw); } catch (e) {}
+  }
+  function showToast(msg) {
     var t = document.getElementById('toast');
-    t.textContent = '셀록홈즈 여는 중: ' + kw + ' (자동검색)';
+    t.textContent = msg;
     t.classList.add('show');
     setTimeout(function(){ t.classList.remove('show'); }, 2000);
-    // href(target=_blank)로 셀록홈즈가 새 탭에서 열립니다
-    // 자동검색 확장(유저스크립트) 설치 시 키워드가 자동 검색됩니다
+  }
+
+  // 셀록홈즈/쿠팡을 각각 전용 창 하나에서 재사용 (창 핸들을 잡아 재이동 → 로그인 유지)
+  var cpWin = null;
+  // 셀록홈즈는 창을 재사용하면 쿠팡 윙 로그인이 풀리므로, 매번 새 탭에서 엽니다.
+  function onSkClick(el) {
+    copyToClip(el.getAttribute('data-kw'));
+    showToast('셀록홈즈 여는 중: ' + el.getAttribute('data-kw') + ' (자동검색)');
+    // 새 탭 열기는 앵커 기본 동작(target=_blank)에 맡깁니다.
+  }
+  // 쿠팡은 윙 로그인 이슈가 없으므로 전용 창 하나를 재사용합니다.
+  function onCpClick(el, ev) {
+    var url = el.getAttribute('href');
+    if (cpWin && !cpWin.closed) {
+      try { cpWin.location.href = url; cpWin.focus(); ev.preventDefault(); return; } catch (e) {}
+    }
+    var w = window.open(url, 'coupang_tab');
+    if (w) { cpWin = w; ev.preventDefault(); }
   }
   function exportCSV() {
     var rows = document.querySelectorAll('table.rk tbody tr');
@@ -394,15 +418,15 @@ else:
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
   }
 
-  // 카테고리 더보기/접기 (1차>2차 ↔ 전체 경로)
+  // 카테고리 펼치기/접기 (1차>2차 ↔ 전체 경로)
   function toggleCat(el) {
     var textSpan = el.parentElement.querySelector('.cat-text');
     if (el.getAttribute('data-open') === '1') {
       textSpan.textContent = el.getAttribute('data-short');
-      el.textContent = ' ⋯더보기'; el.setAttribute('data-open', '0');
+      el.textContent = '▾'; el.setAttribute('data-open', '0');
     } else {
       textSpan.textContent = el.getAttribute('data-full');
-      el.textContent = ' 접기'; el.setAttribute('data-open', '1');
+      el.textContent = '▴'; el.setAttribute('data-open', '1');
     }
   }
 
@@ -411,64 +435,136 @@ else:
     return (td.getAttribute('data-full') || td.innerText || '');
   }
 
-  // ── 엑셀식 필터 (열별 입력칸) ────────────────────────────────────
-  function applyFilters() {
-    var inputs = document.querySelectorAll('.fbox');
-    var filters = [];
-    inputs.forEach(function(inp){
-      var v = (inp.value || '').trim().toLowerCase();
-      if (v) filters.push({ col: parseInt(inp.getAttribute('data-col')), v: v });
-    });
-    var rows = document.querySelectorAll('table.rk tbody tr');
-    var shown = 0;
-    rows.forEach(function(tr){
-      var td = tr.querySelectorAll('td');
-      var ok = filters.every(function(f){
-        return cellText(td[f.col]).toLowerCase().indexOf(f.v) !== -1;
-      });
-      tr.style.display = ok ? '' : 'none';
-      if (ok) shown++;
-    });
-    var cnt = document.getElementById('rowcount');
-    if (cnt) cnt.textContent = shown + '개 표시';
-  }
-
-  // ── 열 정렬 (제목 클릭: 오름 → 내림 → 원래순서) ──────────────────
-  var sortState = { col: -1, dir: 0 };
+  // ── 엑셀식 필터/정렬 ──────────────────────────────────────────────
   function _num(s){
     var n = parseFloat((s || '').replace(/,/g, '').replace(/[^0-9.-]/g, ''));
     return isNaN(n) ? null : n;
   }
-  function sortBy(col) {
-    if (sortState.col === col) {
-      sortState.dir = sortState.dir === 1 ? -1 : (sortState.dir === -1 ? 0 : 1);
-    } else { sortState.col = col; sortState.dir = 1; }
-    var tbody = document.querySelector('table.rk tbody');
-    var rows = Array.prototype.slice.call(tbody.querySelectorAll('tr'));
-    if (sortState.dir === 0) {
-      sortState.col = -1;
-      rows.sort(function(a, b){ return (+a.getAttribute('data-i')) - (+b.getAttribute('data-i')); });
-    } else {
-      rows.sort(function(a, b){
-        var av = cellText(a.querySelectorAll('td')[col]).trim();
-        var bv = cellText(b.querySelectorAll('td')[col]).trim();
-        var an = _num(av), bn = _num(bv), cmp;
-        if (an !== null && bn !== null) cmp = an - bn;
-        else cmp = av.localeCompare(bv, 'ko');
-        return sortState.dir === 1 ? cmp : -cmp;
-      });
-    }
-    rows.forEach(function(r){ tbody.appendChild(r); });
-    document.querySelectorAll('.th-t .arr').forEach(function(sp){ sp.textContent = ''; });
-    if (sortState.dir !== 0) {
-      var arr = document.querySelector('th[data-col="' + col + '"] .arr');
-      if (arr) arr.textContent = sortState.dir === 1 ? ' ▲' : ' ▼';
-    }
+  var colFilters = {};   // col -> Set(허용 값)
+  var panel = null;
+
+  function distinctValues(col){
+    var seen = {};
+    document.querySelectorAll('table.rk tbody tr').forEach(function(tr){
+      seen[cellText(tr.querySelectorAll('td')[col]).trim()] = true;
+    });
+    return Object.keys(seen).sort(function(a, b){
+      var an = _num(a), bn = _num(b);
+      if (an !== null && bn !== null) return an - bn;
+      return a.localeCompare(b, 'ko');
+    });
   }
 
-  // 초기화: 필터 입력 이벤트 연결
-  document.querySelectorAll('.fbox').forEach(function(inp){
-    inp.addEventListener('input', applyFilters);
+  function closePanel(){ if (panel) { panel.remove(); panel = null; } }
+
+  function openFilter(col, ev){
+    ev.stopPropagation();
+    closePanel();
+    var vals = distinctValues(col);
+    var allowed = colFilters[col];
+    panel = document.createElement('div');
+    panel.className = 'fpanel';
+
+    var sortRow = document.createElement('div'); sortRow.className = 'fp-sort';
+    var bAsc = document.createElement('button'); bAsc.textContent = '🔼 오름차순'; bAsc.onclick = function(){ doSort(col, 1); };
+    var bDesc = document.createElement('button'); bDesc.textContent = '🔽 내림차순'; bDesc.onclick = function(){ doSort(col, -1); };
+    sortRow.appendChild(bAsc); sortRow.appendChild(bDesc);
+    panel.appendChild(sortRow);
+
+    var search = document.createElement('input'); search.className = 'fp-search'; search.placeholder = '검색...';
+    search.oninput = function(){
+      var q = search.value.toLowerCase();
+      panel.querySelectorAll('.fp-item').forEach(function(it){
+        it.style.display = it.textContent.toLowerCase().indexOf(q) !== -1 ? '' : 'none';
+      });
+    };
+    panel.appendChild(search);
+
+    var allLbl = document.createElement('label'); allLbl.className = 'fp-all';
+    var allBox = document.createElement('input'); allBox.type = 'checkbox'; allBox.checked = true;
+    allBox.onchange = function(){
+      panel.querySelectorAll('.fp-item').forEach(function(it){
+        if (it.style.display !== 'none') it.querySelector('.fp-val').checked = allBox.checked;
+      });
+    };
+    allLbl.appendChild(allBox); allLbl.appendChild(document.createTextNode(' (전체 선택)'));
+    panel.appendChild(allLbl);
+
+    var list = document.createElement('div'); list.className = 'fp-list';
+    vals.forEach(function(v){
+      var lbl = document.createElement('label'); lbl.className = 'fp-item';
+      var cb = document.createElement('input'); cb.type = 'checkbox'; cb.className = 'fp-val'; cb.value = v;
+      cb.checked = !allowed || allowed.has(v);
+      if (!cb.checked) allBox.checked = false;
+      lbl.appendChild(cb); lbl.appendChild(document.createTextNode(' ' + (v || '(빈값)')));
+      list.appendChild(lbl);
+    });
+    panel.appendChild(list);
+
+    var btns = document.createElement('div'); btns.className = 'fp-btns';
+    var ok = document.createElement('button'); ok.textContent = '확인'; ok.onclick = function(){ applyColFilter(col); };
+    var clr = document.createElement('button'); clr.textContent = '필터 해제'; clr.onclick = function(){ clearColFilter(col); };
+    btns.appendChild(ok); btns.appendChild(clr);
+    panel.appendChild(btns);
+
+    document.body.appendChild(panel);
+    var rect = ev.target.getBoundingClientRect();
+    var left = Math.min(rect.left, window.innerWidth - 228);
+    panel.style.left = Math.max(4, left) + 'px';
+    panel.style.top = (rect.bottom + 2) + 'px';
+    search.focus();
+  }
+
+  function applyColFilter(col){
+    var boxes = panel.querySelectorAll('.fp-val');
+    var checked = [];
+    boxes.forEach(function(cb){ if (cb.checked) checked.push(cb.value); });
+    if (checked.length === boxes.length) delete colFilters[col];
+    else colFilters[col] = new Set(checked);
+    markBtn(col); applyAllFilters(); closePanel();
+  }
+  function clearColFilter(col){ delete colFilters[col]; markBtn(col); applyAllFilters(); closePanel(); }
+
+  function markBtn(col){
+    var b = document.querySelector('.fbtn[data-col="' + col + '"]');
+    if (b) b.className = 'fbtn' + (colFilters[col] ? ' active' : '');
+  }
+
+  function applyAllFilters(){
+    var cols = Object.keys(colFilters).map(Number);
+    var rows = document.querySelectorAll('table.rk tbody tr');
+    var shown = 0;
+    rows.forEach(function(tr){
+      var td = tr.querySelectorAll('td');
+      var ok = cols.every(function(c){ return colFilters[c].has(cellText(td[c]).trim()); });
+      tr.style.display = ok ? '' : 'none';
+      if (ok) shown++;
+    });
+    var cnt = document.getElementById('rowcount'); if (cnt) cnt.textContent = shown + '개 표시';
+  }
+
+  function doSort(col, dir){
+    var tbody = document.querySelector('table.rk tbody');
+    var rows = Array.prototype.slice.call(tbody.querySelectorAll('tr'));
+    rows.sort(function(a, b){
+      var av = cellText(a.querySelectorAll('td')[col]).trim();
+      var bv = cellText(b.querySelectorAll('td')[col]).trim();
+      var an = _num(av), bn = _num(bv), cmp;
+      if (an !== null && bn !== null) cmp = an - bn;
+      else cmp = av.localeCompare(bv, 'ko');
+      return dir === 1 ? cmp : -cmp;
+    });
+    rows.forEach(function(r){ tbody.appendChild(r); });
+    document.querySelectorAll('.sarr').forEach(function(s){ s.textContent = ''; });
+    var sa = document.querySelector('th[data-col="' + col + '"] .sarr');
+    if (sa) sa.textContent = dir === 1 ? ' ▲' : ' ▼';
+    closePanel();
+  }
+
+  // 패널 바깥 클릭 시 닫기
+  document.addEventListener('click', function(e){
+    if (panel && !panel.contains(e.target) &&
+        !(e.target.classList && e.target.classList.contains('fbtn'))) closePanel();
   });
 </script>
 """.replace("__ROWS__", rows_html)
